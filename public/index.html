@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>MediaForge</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial; background: #f0f2f5; padding: 30px; }
+    h1 { color: #2E75B6; margin-bottom: 30px; text-align: center; }
+    .card { background: white; border-radius: 10px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    h2 { color: #1F4E79; margin-bottom: 16px; font-size: 18px; }
+    input[type="file"] { margin-bottom: 12px; display: block; }
+    button { padding: 10px 20px; margin: 5px; background: #2E75B6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    button:hover { background: #1F4E79; }
+    button:disabled { background: #aaa; cursor: not-allowed; }
+    #status { margin-top: 12px; color: #444; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { background: #2E75B6; color: white; padding: 10px; text-align: left; }
+    td { padding: 10px; border-bottom: 1px solid #eee; }
+    tr:hover td { background: #f5f8ff; }
+    a { color: #2E75B6; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .badge { padding: 3px 10px; border-radius: 20px; font-size: 12px; }
+    .done { background: #e6f4ea; color: #2d7a3a; }
+    .uploaded { background: #fff3cd; color: #856404; }
+    .error { background: #fdecea; color: #c0392b; }
+  </style>
+</head>
+<body>
+
+  <h1>🎬 MediaForge — Video Processing Platform</h1>
+
+  <!-- Upload -->
+  <div class="card">
+    <h2>1. Upload Video</h2>
+    <input type="file" id="fileInput" accept="video/*" />
+    <button onclick="uploadFile()">Upload</button>
+    <p id="uploadStatus"></p>
+  </div>
+
+  <!-- Chức năng -->
+  <div class="card" id="actions" style="display:none">
+    <h2>2. Chọn chức năng xử lý</h2>
+    <button onclick="convert('to-mp3')">🎵 Chuyển sang MP3</button>
+    <button onclick="convert('compress')">📦 Nén Video</button>
+    <button onclick="convert('thumbnail')">🖼️ Chụp Thumbnail</button>
+    <p id="convertStatus"></p>
+  </div>
+
+  <!-- Lịch sử -->
+  <div class="card">
+    <h2>3. Lịch sử xử lý</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Tên file gốc</th>
+          <th>Loại xử lý</th>
+          <th>Trạng thái</th>
+          <th>Thời gian</th>
+          <th>Tải về</th>
+        </tr>
+      </thead>
+      <tbody id="historyBody">
+        <tr><td colspan="5" style="text-align:center; color:#aaa">Chưa có file nào</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    let currentFileId = null;
+    let currentFilename = null;
+
+    async function uploadFile() {
+      const file = document.getElementById('fileInput').files[0];
+      if (!file) return alert('Vui lòng chọn file video!');
+
+      const formData = new FormData();
+      formData.append('video', file);
+
+      document.getElementById('uploadStatus').innerText = '⏳ Đang upload...';
+
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+
+      if (data.success) {
+        currentFileId = data.fileId;
+        currentFilename = data.filename;
+        document.getElementById('uploadStatus').innerText = '✅ Upload thành công! Chọn chức năng bên dưới.';
+        document.getElementById('actions').style.display = 'block';
+        loadHistory();
+      }
+    }
+
+    async function convert(type) {
+      if (!currentFileId) return alert('Upload file trước!');
+
+      const labels = { 'to-mp3': 'Đang chuyển MP3', 'compress': 'Đang nén video', 'thumbnail': 'Đang chụp thumbnail' };
+      document.getElementById('convertStatus').innerText = '⏳ ' + labels[type] + '...';
+
+      const res = await fetch(`/api/${type}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: currentFilename, fileId: currentFileId })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        document.getElementById('convertStatus').innerText = '✅ Xử lý xong! Xem lịch sử bên dưới.';
+        loadHistory();
+      } else {
+        document.getElementById('convertStatus').innerText = '❌ Lỗi: ' + data.error;
+      }
+    }
+
+    async function loadHistory() {
+      const res = await fetch('/api/history');
+      const files = await res.json();
+      const tbody = document.getElementById('historyBody');
+
+      if (files.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#aaa">Chưa có file nào</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = files.map(f => `
+        <tr>
+          <td>${f.originalName || '-'}</td>
+          <td>${f.type || '-'}</td>
+          <td><span class="badge ${f.status}">${f.status}</span></td>
+          <td>${new Date(f.createdAt).toLocaleString('vi-VN')}</td>
+          <td>${f.outputName
+            ? `<a href="/api/download/${f.outputName}">Tải về</a>`
+            : '-'
+          }</td>
+        </tr>
+      `).join('');
+    }
+
+    // Load lịch sử khi mở trang
+    loadHistory();
+  </script>
+
+</body>
+</html>
