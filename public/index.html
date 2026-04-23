@@ -67,6 +67,25 @@
   </div>
 
   <script>
+    /**
+     * failed to fetch: thường do mở HTML bằng file:// / Live Server — request sai host.
+     * Mở đúng: chạy "node server.js" rồi vào http://127.0.0.1:3000 (cùng app phục vụ /api)
+     * Port API mặc định 3000: đổi ở đây nếu .env PORT khác VÀ bạn dùng Live Server.
+     */
+    const DEFAULT_API_PORT = '3000';
+    const STATIC_DEV_PORTS = new Set(['5500', '5501', '8080', '5173', '4173', '3001', '5001']);
+    const API_BASE = (() => {
+      if (typeof location === 'undefined') return '';
+      if (location.protocol === 'file:') {
+        return 'http://127.0.0.1:' + DEFAULT_API_PORT;
+      }
+      if (location.port && STATIC_DEV_PORTS.has(location.port)) {
+        return location.protocol + '//' + location.hostname + ':' + DEFAULT_API_PORT;
+      }
+      return '';
+    })();
+    const api = (path) => API_BASE + path;
+
     let currentFileId = null;
     let currentFilename = null;
 
@@ -79,15 +98,23 @@
 
       document.getElementById('uploadStatus').innerText = '⏳ Đang upload...';
 
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
-      const data = await res.json();
+      let res, data;
+      try {
+        res = await fetch(api('/api/upload'), { method: 'POST', body: formData });
+        data = await res.json();
+      } catch (e) {
+        document.getElementById('uploadStatus').innerText = '❌ ' + (e && e.message ? e.message : 'Lỗi mạng (failed to fetch). Chạy: node server.js rồi mở http://127.0.0.1:' + DEFAULT_API_PORT);
+        return;
+      }
 
       if (data.success) {
         currentFileId = data.fileId;
         currentFilename = data.filename;
         document.getElementById('uploadStatus').innerText = '✅ Upload thành công! Chọn chức năng bên dưới.';
         document.getElementById('actions').style.display = 'block';
-        loadHistory();
+        await loadHistory();
+      } else {
+        document.getElementById('uploadStatus').innerText = '❌ ' + (data.error || 'Lỗi server');
       }
     }
 
@@ -97,24 +124,45 @@
       const labels = { 'to-mp3': 'Đang chuyển MP3', 'compress': 'Đang nén video', 'thumbnail': 'Đang chụp thumbnail' };
       document.getElementById('convertStatus').innerText = '⏳ ' + labels[type] + '...';
 
-      const res = await fetch(`/api/${type}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: currentFilename, fileId: currentFileId })
-      });
-      const data = await res.json();
+      let res, data;
+      try {
+        res = await fetch(api(`/api/${type}`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: currentFilename, fileId: currentFileId })
+        });
+        data = await res.json();
+      } catch (e) {
+        document.getElementById('convertStatus').innerText = '❌ ' + (e && e.message ? e.message : 'Lỗi mạng — chắc server chưa chạy (node server.js).');
+        return;
+      }
 
       if (data.success) {
         document.getElementById('convertStatus').innerText = '✅ Xử lý xong! Xem lịch sử bên dưới.';
-        loadHistory();
+        await loadHistory();
       } else {
-        document.getElementById('convertStatus').innerText = '❌ Lỗi: ' + data.error;
+        document.getElementById('convertStatus').innerText = '❌ Lỗi: ' + (data.error || res.status);
       }
     }
 
     async function loadHistory() {
-      const res = await fetch('/api/history');
-      const files = await res.json();
+      let res, files;
+      try {
+        res = await fetch(api('/api/history'));
+        const text = await res.text();
+        try {
+          files = text ? JSON.parse(text) : [];
+        } catch (parseErr) {
+          const tbody = document.getElementById('historyBody');
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#c0392b">Lỗi dữ liệu từ server</td></tr>';
+          return;
+        }
+      } catch (e) {
+        const tbody = document.getElementById('historyBody');
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#c0392b">Không tải được lịch sử (server tắt? Chạy: node server.js)</td></tr>';
+        return;
+      }
+      if (!Array.isArray(files)) files = [];
       const tbody = document.getElementById('historyBody');
 
       if (files.length === 0) {
@@ -129,7 +177,7 @@
           <td><span class="badge ${f.status}">${f.status}</span></td>
           <td>${new Date(f.createdAt).toLocaleString('vi-VN')}</td>
           <td>${f.outputName
-            ? `<a href="/api/download/${f.outputName}">Tải về</a>`
+            ? `<a href="${api('/api/download/' + encodeURIComponent(f.outputName))}">Tải về</a>`
             : '-'
           }</td>
         </tr>
@@ -137,7 +185,7 @@
     }
 
     // Load lịch sử khi mở trang
-    loadHistory();
+    loadHistory().catch(function () { /* giao dien da hien thi loi o trong */ });
   </script>
 
 </body>

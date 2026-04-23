@@ -5,6 +5,20 @@ const { promisify } = require('util');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 
+let ffmpegPath;
+try {
+	ffmpegPath = require('ffmpeg-static');
+} catch {
+	ffmpegPath = null;
+}
+if (ffmpegPath) {
+	ffmpeg.setFfmpegPath(ffmpegPath);
+} else {
+	console.warn(
+		'[video] Cai "ffmpeg-static" (npm i) hoac cai FFmpeg va them vao PATH de xu ly video.'
+	);
+}
+
 const File = require('../models/File');
 
 const router = express.Router();
@@ -32,6 +46,14 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 const updateFileById = (fileId, payload) => File.findByIdAndUpdate(fileId, payload, { new: true });
+
+async function safeUpdateError(fileId) {
+	try {
+		await updateFileById(fileId, { status: 'error' });
+	} catch (e) {
+		console.error('[video] Loi ghi trang thai error:', e.message);
+	}
+}
 
 const statAsync = promisify(fs.stat);
 
@@ -86,11 +108,10 @@ router.post('/to-mp3', async (req, res) => {
 		const inputPath = await ensureInputExists(filename);
 
 		await new Promise((resolve, reject) => {
-			ffmpeg(inputPath)
-				.toFormat('mp3')
-				.save(outputPath)
-				.on('end', resolve)
-				.on('error', reject);
+			const cmd = ffmpeg(inputPath).toFormat('mp3');
+			cmd.on('end', resolve);
+			cmd.on('error', reject);
+			cmd.save(outputPath);
 		});
 
 		await updateFileById(fileId, {
@@ -101,8 +122,7 @@ router.post('/to-mp3', async (req, res) => {
 
 		return res.json({ success: true, outputName });
 	} catch (error) {
-		await updateFileById(fileId, { status: 'error' });
-
+		await safeUpdateError(fileId);
 		return res.status(500).json({ success: false, error: error.message });
 	}
 });
@@ -121,12 +141,17 @@ router.post('/compress', async (req, res) => {
 	try {
 		const inputPath = await ensureInputExists(filename);
 
+		// Khong dung videoBitrate co dinh (vd. 500k): neu video goc nho hom,
+		// muc tieu nay lam file SW lon hon. Dung CRF = giam theo chat luong, thuong nho hon.
 		await new Promise((resolve, reject) => {
-			ffmpeg(inputPath)
-				.videoBitrate('500k')
-				.save(outputPath)
-				.on('end', resolve)
-				.on('error', reject);
+			const cmd = ffmpeg(inputPath)
+				.format('mp4')
+				.videoCodec('libx264')
+				.audioCodec('aac')
+				.outputOptions(['-crf 28', '-preset fast', '-movflags +faststart', '-b:a 96k']);
+			cmd.on('end', resolve);
+			cmd.on('error', reject);
+			cmd.save(outputPath);
 		});
 
 		await updateFileById(fileId, {
@@ -137,8 +162,7 @@ router.post('/compress', async (req, res) => {
 
 		return res.json({ success: true, outputName });
 	} catch (error) {
-		await updateFileById(fileId, { status: 'error' });
-
+		await safeUpdateError(fileId);
 		return res.status(500).json({ success: false, error: error.message });
 	}
 });
@@ -157,14 +181,14 @@ router.post('/thumbnail', async (req, res) => {
 		const inputPath = await ensureInputExists(filename);
 
 		await new Promise((resolve, reject) => {
-			ffmpeg(inputPath)
-				.screenshots({
-					timestamps: ['00:00:02'],
-					filename: outputName,
-					folder: outputsDir
-				})
-				.on('end', resolve)
-				.on('error', reject);
+			const cmd = ffmpeg(inputPath);
+			cmd.on('end', resolve);
+			cmd.on('error', reject);
+			cmd.screenshots({
+				timestamps: ['1'],
+				filename: outputName,
+				folder: outputsDir
+			});
 		});
 
 		await updateFileById(fileId, {
@@ -175,8 +199,7 @@ router.post('/thumbnail', async (req, res) => {
 
 		return res.json({ success: true, outputName });
 	} catch (error) {
-		await updateFileById(fileId, { status: 'error' });
-
+		await safeUpdateError(fileId);
 		return res.status(500).json({ success: false, error: error.message });
 	}
 });
