@@ -4,6 +4,7 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 const app = express();
+const port = process.env.PORT || 3000;
 
 app.use(express.static('public'));
 app.use(express.json());
@@ -14,4 +15,4 @@ mongoose.connect(process.env.MONGO_URI)
 
 app.use('/api', require('./routes/video'));
 
-app.listen(3000, () => console.log('Server running on port 3000'));
+app.listen(port, () => console.log(`Server chay port ${port}`));
